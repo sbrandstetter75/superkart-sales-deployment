@@ -5,8 +5,14 @@ import io
 
 app = Flask(__name__)
 
-# Load the serialized pipeline model from the local backend folder directory context
+# Load the serialized pipeline model
 model = joblib.load('superkart_model.joblib')
+
+# Configure model estimators to use a single thread to prevent CPU deadlocks in containers
+if hasattr(model, 'named_steps'):
+    for step_name, step_obj in model.named_steps.items():
+        if hasattr(step_obj, 'n_jobs'):
+            step_obj.n_jobs = 1
 
 @app.route('/v1/predict', methods=['POST'])
 def predict():
@@ -43,4 +49,5 @@ def predict_batch():
         return jsonify({'error': str(e)}), 400
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=7860)
+    # Run with threaded=True to prevent request blocking
+    app.run(host='0.0.0.0', port=7860, threaded=True)
