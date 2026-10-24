@@ -8,22 +8,35 @@ st.set_page_config(page_title="SuperKart Sales Forecaster", layout="wide")
 st.title("🛒 SuperKart Sales Forecasting Service")
 st.write("Deploys predictions for store-level product sales.")
 
-# Configure alternate URLs to ensure high-availability routing inside Codespaces
-primary_backend_url = "http://superkart-backend:7860"
-fallback_backend_url = "https://studious-space-fortnight-4qvwwqxg74g535rv5-7860.app.github.dev"
+# Dynamic route list
+ROUTES = [
+    {"name": "Docker Network (Internal)", "url": "http://superkart-backend:7860"},
+    {"name": "Localhost (Host Loopback)", "url": "http://127.0.0.1:7860"},
+    {"name": "Public Forwarded (External)", "url": "https://studious-space-fortnight-4qvwwqxg74g535rv5-7860.app.github.dev"}
+]
 
-# Dynamic URL Picker to handle Docker Internal vs External network routing
-def make_request(method, endpoint, **kwargs):
-    for base_url in [primary_backend_url, fallback_backend_url]:
-        target_url = f"{base_url.rstrip('/')}{endpoint}"
+# Dynamic Request Router with detailed Streamlit logging
+def make_request_with_diagnostics(method, endpoint, **kwargs):
+    logs = []
+    for route in ROUTES:
+        target_url = f"{route['url'].rstrip('/')}{endpoint}"
         try:
             if method == 'POST':
-                response = requests.post(target_url, timeout=5, **kwargs)
+                response = requests.post(target_url, timeout=3, **kwargs)
                 if response.status_code in [200, 400]:
-                    return response
-        except requests.exceptions.RequestException:
-            continue
-    raise Exception("Failed to connect to both internal and external prediction hosts.")
+                    return response, logs
+                else:
+                    logs.append(f"❌ {route['name']}: Got unexpected status {response.status_code}")
+        except requests.exceptions.Timeout:
+            logs.append(f"⏳ {route['name']}: Connection Timed Out")
+        except requests.exceptions.ConnectionError as ce:
+            logs.append(f"🔌 {route['name']}: Connection Refused / Couldn't Resolve ({type(ce).__name__})")
+        except Exception as e:
+            logs.append(f"⚠️ {route['name']}: Error -> {str(e)}")
+    
+    # If all routes failed
+    error_msg = "\n".join(logs)
+    raise Exception(f"Failed to connect to all prediction hosts:\n{error_msg}")
 
 tab1, tab2 = st.tabs(["Single Prediction", "Batch Prediction (CSV)"])
 
@@ -59,14 +72,16 @@ with tab1:
             "Product_Type_Category": product_category
         }
         try:
-            response = make_request('POST', '/v1/predict', json=payload)
+            with st.spinner("Predicting..."):
+                response, logs = make_request_with_diagnostics('POST', '/v1/predict', json=payload)
             if response.status_code == 200:
                 result = response.json()
                 st.success(f"Predicted Product Store Sales Total: ${result['prediction']:.2f}")
             else:
                 st.error(f"Backend Error: {response.text}")
         except Exception as e:
-            st.error(f"Could not reach prediction service: {e}")
+            st.error("🚨 Inference Connectivity Error")
+            st.text(str(e))
 
 with tab2:
     st.header("Bulk Batch Sales Prediction")
@@ -82,7 +97,8 @@ with tab2:
             try:
                 uploaded_file.seek(0)
                 files = {'file': (uploaded_file.name, uploaded_file.read(), 'text/csv')}
-                response = make_request('POST', '/v1/predictbatch', files=files)
+                with st.spinner("Processing batch..."):
+                    response, logs = make_request_with_diagnostics('POST', '/v1/predictbatch', files=files)
 
                 if response.status_code == 200:
                     predictions_dict = response.json()
@@ -103,4 +119,5 @@ with tab2:
                 else:
                     st.error(f"Backend Error: {response.text}")
             except Exception as e:
-                st.error(f"Failed to connect to backend: {e}")
+                st.error("🚨 Batch Inference Connectivity Error")
+                st.text(str(e))
