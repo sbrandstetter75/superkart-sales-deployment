@@ -8,16 +8,28 @@ st.set_page_config(page_title="SuperKart Sales Forecaster", layout="wide")
 st.title("🛒 SuperKart Sales Forecasting Service")
 st.write("Deploys predictions for store-level product sales.")
 
-# Side-by-side tabs for Single vs Batch Prediction
-tab1, tab2 = st.tabs(["Single Prediction", "Batch Prediction (CSV)"])
+# Configure alternate URLs to ensure high-availability routing inside Codespaces
+primary_backend_url = "http://superkart-backend:7860"
+fallback_backend_url = "https://studious-space-fortnight-4qvwwqxg74g535rv5-7860.app.github.dev"
 
-# Configure URL targeting the backend container name inside the Docker network
-backend_url_single = "http://superkart-backend:7860/v1/predict"
-backend_url_batch = "http://superkart-backend:7860/v1/predictbatch"
+# Dynamic URL Picker to handle Docker Internal vs External network routing
+def make_request(method, endpoint, **kwargs):
+    for base_url in [primary_backend_url, fallback_backend_url]:
+        target_url = f"{base_url.rstrip('/')}{endpoint}"
+        try:
+            if method == 'POST':
+                response = requests.post(target_url, timeout=5, **kwargs)
+                if response.status_code in [200, 400]:
+                    return response
+        except requests.exceptions.RequestException:
+            continue
+    raise Exception("Failed to connect to both internal and external prediction hosts.")
+
+tab1, tab2 = st.tabs(["Single Prediction", "Batch Prediction (CSV)"])
 
 with tab1:
     st.header("Real-Time Single Product Sales Prediction")
-    
+
     col1, col2 = st.columns(2)
     with col1:
         product_weight = st.number_input("Product Weight", min_value=1.0, max_value=50.0, value=12.66)
@@ -25,7 +37,7 @@ with tab1:
         product_area = st.number_input("Product Allocated Area Ratio", min_value=0.001, max_value=1.0, value=0.027, format="%.4f")
         product_mrp = st.number_input("Product MRP", min_value=1.0, max_value=1000.0, value=117.08)
         product_category = st.selectbox("Product Type Category", ["Perishables", "Non Perishables"])
-        
+
     with col2:
         store_size = st.selectbox("Store Size", ["Medium", "High", "Small"])
         store_city = st.selectbox("Store Location City Type", ["Tier 1", "Tier 2", "Tier 3"])
@@ -47,7 +59,7 @@ with tab1:
             "Product_Type_Category": product_category
         }
         try:
-            response = requests.post(backend_url_single, json=payload)
+            response = make_request('POST', '/v1/predict', json=payload)
             if response.status_code == 200:
                 result = response.json()
                 st.success(f"Predicted Product Store Sales Total: ${result['prediction']:.2f}")
@@ -59,30 +71,27 @@ with tab1:
 with tab2:
     st.header("Bulk Batch Sales Prediction")
     st.write("Upload a CSV file containing the features to receive model forecasts.")
-    
+
     uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
     if uploaded_file is not None:
-        # Show preview of uploaded file
         input_df = pd.read_csv(uploaded_file)
         st.write("File Preview:")
         st.dataframe(input_df.head())
-        
+
         if st.button("Run Batch Forecast"):
             try:
-                # Reset buffer back to starting byte position
                 uploaded_file.seek(0)
                 files = {'file': (uploaded_file.name, uploaded_file.read(), 'text/csv')}
-                response = requests.post(backend_url_batch, files=files)
-                
+                response = make_request('POST', '/v1/predictbatch', files=files)
+
                 if response.status_code == 200:
                     predictions_dict = response.json()
                     predictions_series = pd.Series(predictions_dict).sort_index(key=lambda x: x.astype(int))
                     input_df['Predicted_Product_Store_Sales_Total'] = predictions_series.values
-                    
+
                     st.success("Batch Forecasting Complete!")
                     st.dataframe(input_df)
-                    
-                    # Allow downloading the result
+
                     csv_buffer = io.StringIO()
                     input_df.to_csv(csv_buffer, index=False)
                     st.download_button(
