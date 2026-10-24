@@ -14,7 +14,7 @@ services:
   superkart-frontend:
     build:
       context: ./frontend_files
-      dockerfile: Dockerfile_frontend
+      dockerfile: Dockerfile
     container_name: superkart-frontend
     ports:
       - "8501:8501"
