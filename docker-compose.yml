@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  superkart-backend:
+    build:
+      context: ./backend_files
+      dockerfile: Dockerfile
+    container_name: superkart-backend
+    ports:
+      - "7860:7860"
+    networks:
+      - superkart-network
+
+  superkart-frontend:
+    build:
+      context: ./frontend_files
+      dockerfile: Dockerfile_frontend
+    container_name: superkart-frontend
+    ports:
+      - "8501:8501"
+    depends_on:
+      - superkart-backend
+    networks:
+      - superkart-network
+
+networks:
+  superkart-network:
+    driver: bridge
